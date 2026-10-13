@@ -9,7 +9,8 @@ import {
   listBlockedDates,
   listWorkingHours,
 } from '../../api/availability'
-import { ApiError } from '../../api/client'
+import { changePassword } from '../../api/auth'
+import { ApiError, fieldErrors } from '../../api/client'
 import { getClinicSettings, updateClinicSettings } from '../../api/clinic'
 import {
   ActionButton,
@@ -41,6 +42,7 @@ const TABS = [
   { to: '/clinic/settings', label: 'Clinic Details', end: true },
   { to: '/clinic/settings/availability', label: 'Working Hours' },
   { to: '/clinic/settings/blocked-dates', label: 'Holidays' },
+  { to: '/clinic/settings/password', label: 'My Password' },
 ]
 
 export function SettingsPage() {
@@ -85,6 +87,7 @@ export function SettingsPage() {
         <Route index element={<ClinicDetailsTab canManage={canManage} />} />
         <Route path="availability" element={<WorkingHoursTab canManage={canManage} />} />
         <Route path="blocked-dates" element={<BlockedDatesTab canManage={canManage} />} />
+        <Route path="password" element={<PasswordTab />} />
       </Routes>
     </>
   )
@@ -208,6 +211,102 @@ function ClinicDetailsTab({ canManage }: { canManage: boolean }) {
             }
           />
         </Field>
+      </div>
+    </Card>
+  )
+}
+
+function PasswordTab() {
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [fields, setFields] = useState<Record<string, string>>({})
+  const [saved, setSaved] = useState(false)
+
+  async function submit() {
+    setError(null)
+    setFields({})
+    setSaved(false)
+
+    if (newPassword !== confirmPassword) {
+      setError('New password and confirmation do not match.')
+      return
+    }
+
+    setSaving(true)
+    try {
+      await changePassword(currentPassword, newPassword)
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setSaved(true)
+    } catch (err) {
+      const errs = fieldErrors(err)
+      if (Object.keys(errs).length > 0) {
+        setFields(errs)
+      } else {
+        setError(err instanceof ApiError ? err.message : 'Could not change the password.')
+      }
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Card className="max-w-md">
+      <CardTitle>Change My Password</CardTitle>
+      <p className="mb-4 text-sm text-(--color-ink-soft)">
+        This changes the password for your own login only.
+      </p>
+
+      {error && (
+        <div className="mb-4">
+          <ErrorNote>{error}</ErrorNote>
+        </div>
+      )}
+      {saved && (
+        <p className="mb-4 rounded-lg border border-(--color-accent)/30 bg-(--color-accent-soft) px-4 py-2.5 text-sm text-(--color-accent)">
+          Password changed.
+        </p>
+      )}
+
+      <div className="grid gap-4">
+        <Field label="Current Password" required error={fields.detail}>
+          <TextInput
+            type="password"
+            autoComplete="current-password"
+            value={currentPassword}
+            onChange={(e) => setCurrentPassword(e.target.value)}
+          />
+        </Field>
+        <Field label="New Password" required error={fields.new_password}>
+          <TextInput
+            type="password"
+            autoComplete="new-password"
+            value={newPassword}
+            onChange={(e) => setNewPassword(e.target.value)}
+          />
+        </Field>
+        <Field label="Confirm New Password" required>
+          <TextInput
+            type="password"
+            autoComplete="new-password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+          />
+        </Field>
+      </div>
+
+      <div className="mt-4">
+        <ActionButton
+          tone="primary"
+          onClick={submit}
+          disabled={saving || !currentPassword || !newPassword || !confirmPassword}
+        >
+          {saving ? 'Changing…' : 'Change Password'}
+        </ActionButton>
       </div>
     </Card>
   )

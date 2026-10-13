@@ -67,6 +67,53 @@ class RolePermissionTests(APITestCase):
         self.assertFalse(response.data["can_prescribe"])
 
 
+class ChangePasswordTests(APITestCase):
+    """Any signed-in staff member can change their own password."""
+
+    def setUp(self):
+        self.receptionist = make_staff("reception2", StaffProfile.Role.RECEPTIONIST)
+
+    def test_can_change_own_password_with_correct_current_password(self):
+        self.client.force_authenticate(self.receptionist)
+        response = self.client.post(
+            "/api/auth/change-password/",
+            {"current_password": "pw12345!", "new_password": "a-much-better-pw-2026"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.receptionist.refresh_from_db()
+        self.assertTrue(self.receptionist.check_password("a-much-better-pw-2026"))
+
+    def test_wrong_current_password_is_rejected(self):
+        self.client.force_authenticate(self.receptionist)
+        response = self.client.post(
+            "/api/auth/change-password/",
+            {"current_password": "not-the-password", "new_password": "a-much-better-pw-2026"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.receptionist.refresh_from_db()
+        self.assertTrue(self.receptionist.check_password("pw12345!"))
+
+    def test_weak_new_password_is_rejected(self):
+        self.client.force_authenticate(self.receptionist)
+        response = self.client.post(
+            "/api/auth/change-password/",
+            {"current_password": "pw12345!", "new_password": "12345"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("new_password", response.data)
+
+    def test_requires_authentication(self):
+        response = self.client.post(
+            "/api/auth/change-password/",
+            {"current_password": "pw12345!", "new_password": "a-much-better-pw-2026"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 401)
+
+
 class PatientDirectoryTests(APITestCase):
     def setUp(self):
         self.user = make_staff("dentist2", StaffProfile.Role.DENTIST)

@@ -12,6 +12,7 @@ from .clinical import (
 )
 from .dashboard import (
     AuditLogViewSet,
+    ChangePasswordView,
     CurrentStaffView,
     DashboardStatsView,
     TodayQueueView,
@@ -40,6 +41,7 @@ __all__ = [
     "AuditLogViewSet",
     "AuditedTokenObtainPairView",
     "BlockedDateViewSet",
+    "ChangePasswordView",
     "ClinicSettingsView",
     "ClinicalVisitViewSet",
     "CurrentStaffView",

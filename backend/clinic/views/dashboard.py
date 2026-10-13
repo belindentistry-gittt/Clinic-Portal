@@ -2,6 +2,8 @@
 
 from datetime import date as date_cls, timedelta
 
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Count, Q
 from rest_framework import permissions, viewsets
 from rest_framework.response import Response
@@ -193,3 +195,30 @@ class CurrentStaffView(APIView):
         data = StaffProfileSerializer(profile).data
         data["username"] = request.user.get_username()
         return Response(data)
+
+
+class ChangePasswordView(APIView):
+    """Let a signed-in staff member change their own password.
+
+    Every staff member manages their own login, regardless of
+    can_manage_settings - that capability is about clinic-wide settings, not
+    a person's own account.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        current_password = request.data.get("current_password") or ""
+        new_password = request.data.get("new_password") or ""
+
+        if not request.user.check_password(current_password):
+            return Response({"detail": "Current password is incorrect."}, status=400)
+
+        try:
+            validate_password(new_password, user=request.user)
+        except DjangoValidationError as exc:
+            return Response({"new_password": list(exc.messages)}, status=400)
+
+        request.user.set_password(new_password)
+        request.user.save(update_fields=["password"])
+        return Response({"detail": "Password changed."})

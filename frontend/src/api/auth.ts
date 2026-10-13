@@ -7,3 +7,11 @@ export function login(username: string, password: string) {
     body: { username, password },
   })
 }
+
+export function changePassword(currentPassword: string, newPassword: string) {
+  return apiRequest<{ detail: string }>('/auth/change-password/', {
+    method: 'POST',
+    auth: true,
+    body: { current_password: currentPassword, new_password: newPassword },
+  })
+}

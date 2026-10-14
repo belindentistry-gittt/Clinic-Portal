@@ -1,5 +1,7 @@
 """Patient directory and the records hanging off a patient."""
 
+import csv
+import io
 from datetime import date as date_cls
 
 from django.db import transaction
@@ -7,10 +9,12 @@ from django.db.models import Count, Max, Min, Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 
 from ..audit import record_audit
-from ..matching import normalize_phone
+from ..identifiers import create_with_patient_code
+from ..matching import normalize_email, normalize_phone
 from ..models import (
     Allergy,
     Appointment,
@@ -281,6 +285,112 @@ class PatientViewSet(AuditedModelMixin, viewsets.ModelViewSet):
         patient = self.get_object()
         logs = AuditLog.objects.filter(patient=patient)[:200]
         return Response(AuditLogSerializer(logs, many=True).data)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="import",
+        parser_classes=[MultiPartParser],
+    )
+    def import_csv(self, request):
+        """Bulk-create patients from a CSV export of an old patient list.
+
+        Each row is its own transaction, so one bad row does not cost the
+        rest of the batch. A row is matched against active, non-merged
+        patients by normalized phone or email - the same identifiers a
+        website booking is matched on - and reported as a duplicate rather
+        than creating a second record, so re-uploading the same file (or a
+        file that overlaps with patients already in the system) is harmless.
+        """
+        upload = request.FILES.get("file")
+        if not upload:
+            raise ValidationError({"file": "No file was uploaded."})
+
+        try:
+            decoded = upload.read().decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise ValidationError(
+                {"file": "Could not read that file as text. Save it as CSV (UTF-8) and try again."}
+            )
+
+        reader = csv.DictReader(io.StringIO(decoded))
+        if not reader.fieldnames:
+            raise ValidationError({"file": "The file has no header row."})
+
+        results = []
+        created = duplicates = errors = 0
+
+        for index, raw_row in enumerate(reader, start=2):  # row 1 is the header
+            row = {(key or "").strip(): (value or "").strip() for key, value in raw_row.items()}
+            first_name = row.get("First Name", "")
+            if not first_name:
+                results.append({"row": index, "result": "error", "detail": "First Name is required."})
+                errors += 1
+                continue
+
+            phone = row.get("Phone", "")
+            email = row.get("Email", "")
+            phone_norm = normalize_phone(phone)
+            email_norm = normalize_email(email)
+
+            existing = None
+            if phone_norm:
+                existing = Patient.objects.filter(
+                    is_active=True, merged_into__isnull=True, phone_normalized=phone_norm
+                ).first()
+            if existing is None and email_norm:
+                existing = Patient.objects.filter(
+                    is_active=True, merged_into__isnull=True, email_normalized=email_norm
+                ).first()
+            if existing is not None:
+                results.append(
+                    {
+                        "row": index,
+                        "result": "duplicate",
+                        "detail": f"Matches existing patient {existing.patient_code}.",
+                        "patient_code": existing.patient_code,
+                    }
+                )
+                duplicates += 1
+                continue
+
+            date_of_birth = None
+            dob_raw = row.get("Date of Birth", "")
+            if dob_raw:
+                try:
+                    date_of_birth = date_cls.fromisoformat(dob_raw)
+                except ValueError:
+                    pass  # Left blank rather than failing an otherwise-good row.
+
+            gender_raw = row.get("Gender", "").lower()
+            gender = gender_raw if gender_raw in Patient.Gender.values else ""
+
+            try:
+                with transaction.atomic():
+                    patient = create_with_patient_code(
+                        Patient,
+                        first_name=first_name,
+                        last_name=row.get("Last Name", ""),
+                        phone=phone,
+                        email=email,
+                        date_of_birth=date_of_birth,
+                        gender=gender,
+                        address_line_1=row.get("Address Line 1", ""),
+                        city=row.get("City", ""),
+                        state=row.get("State", ""),
+                        postal_code=row.get("Postal Code", ""),
+                        notes=row.get("Notes", ""),
+                    )
+                record_audit(request, action="create", instance=patient, patient=patient)
+                results.append({"row": index, "result": "created", "patient_code": patient.patient_code})
+                created += 1
+            except Exception as exc:  # noqa: BLE001 - one bad row must not sink the batch
+                results.append({"row": index, "result": "error", "detail": str(exc)})
+                errors += 1
+
+        return Response(
+            {"created": created, "duplicates": duplicates, "errors": errors, "results": results}
+        )
 
     @action(detail=True, methods=["get"], url_path="merge-preview")
     def merge_preview(self, request, uuid=None):

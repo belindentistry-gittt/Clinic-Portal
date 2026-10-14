@@ -1,6 +1,7 @@
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search, Upload } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ImportPatientsModal } from '../../components/clinic/ImportPatientsModal'
 import { ApiError } from '../../api/client'
 import { listPatients } from '../../api/patients'
 import {
@@ -40,6 +41,7 @@ export function PatientsPage() {
   const [count, setCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [importOpen, setImportOpen] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -76,13 +78,24 @@ export function PatientsPage() {
         title="Patients"
         subtitle={`${count} patient${count === 1 ? '' : 's'} on file.`}
         actions={
-          <Link
-            to="/clinic/patients/new"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-(--color-accent) px-3 py-2 text-sm font-medium text-white hover:bg-(--color-accent-hover)"
-          >
-            <Plus className="h-4 w-4" /> Add Patient
-          </Link>
+          <div className="flex gap-2">
+            <ActionButton onClick={() => setImportOpen(true)}>
+              <Upload className="h-4 w-4" /> Import CSV
+            </ActionButton>
+            <Link
+              to="/clinic/patients/new"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-(--color-accent) px-3 py-2 text-sm font-medium text-white hover:bg-(--color-accent-hover)"
+            >
+              <Plus className="h-4 w-4" /> Add Patient
+            </Link>
+          </div>
         }
+      />
+
+      <ImportPatientsModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImported={load}
       />
 
       <Card className="mb-5">

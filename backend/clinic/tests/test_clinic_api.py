@@ -114,6 +114,75 @@ class ChangePasswordTests(APITestCase):
         self.assertEqual(response.status_code, 401)
 
 
+class PatientImportTests(APITestCase):
+    """Bulk-creating patients from a CSV export of an old patient list."""
+
+    def setUp(self):
+        self.user = make_staff("dentist3", StaffProfile.Role.DENTIST)
+        self.client.force_authenticate(self.user)
+
+    @staticmethod
+    def _csv_file(content: str, name: str = "patients.csv"):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        return SimpleUploadedFile(name, content.encode("utf-8"), content_type="text/csv")
+
+    def test_valid_rows_are_created(self):
+        content = (
+            "First Name,Last Name,Phone,Email,Date of Birth,Gender\n"
+            "Priya,Sharma,+91 90000 00002,priya@example.com,1990-05-14,female\n"
+            "Arun,Kumar,+91 90000 00003,,,\n"
+        )
+        response = self.client.post(
+            "/api/patients/import/", {"file": self._csv_file(content)}, format="multipart"
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data["created"], 2)
+        self.assertEqual(response.data["duplicates"], 0)
+        self.assertEqual(response.data["errors"], 0)
+        self.assertTrue(Patient.objects.filter(first_name="Priya", phone_normalized="9000000002").exists())
+
+    def test_row_matching_an_existing_patient_is_a_duplicate_not_a_copy(self):
+        create_with_patient_code(
+            Patient, first_name="Existing", last_name="Patient", phone="+91 90000 00004"
+        )
+        content = "First Name,Last Name,Phone\nSomeone,Else,+91 90000 00004\n"
+        response = self.client.post(
+            "/api/patients/import/", {"file": self._csv_file(content)}, format="multipart"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["created"], 0)
+        self.assertEqual(response.data["duplicates"], 1)
+        self.assertEqual(Patient.objects.filter(phone_normalized="9000000004").count(), 1)
+
+    def test_a_row_missing_first_name_is_reported_without_losing_the_rest(self):
+        content = (
+            "First Name,Last Name,Phone\n"
+            ",NoFirstName,+91 90000 00005\n"
+            "Good,Row,+91 90000 00006\n"
+        )
+        response = self.client.post(
+            "/api/patients/import/", {"file": self._csv_file(content)}, format="multipart"
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["created"], 1)
+        self.assertEqual(response.data["errors"], 1)
+        self.assertTrue(Patient.objects.filter(first_name="Good").exists())
+
+    def test_requires_a_file(self):
+        response = self.client.post("/api/patients/import/", {}, format="multipart")
+        self.assertEqual(response.status_code, 400)
+
+    def test_requires_authentication(self):
+        self.client.force_authenticate(None)
+        response = self.client.post(
+            "/api/patients/import/",
+            {"file": self._csv_file("First Name\nTest\n")},
+            format="multipart",
+        )
+        self.assertEqual(response.status_code, 401)
+
+
 class PatientDirectoryTests(APITestCase):
     def setUp(self):
         self.user = make_staff("dentist2", StaffProfile.Role.DENTIST)

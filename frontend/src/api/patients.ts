@@ -49,6 +49,26 @@ export function createPatient(input: PatientInput) {
   return apiRequest<Patient>('/patients/', { method: 'POST', body: input, auth: true })
 }
 
+export type PatientImportRowResult = {
+  row: number
+  result: 'created' | 'duplicate' | 'error'
+  detail?: string
+  patient_code?: string
+}
+
+export type PatientImportResult = {
+  created: number
+  duplicates: number
+  errors: number
+  results: PatientImportRowResult[]
+}
+
+export function importPatients(file: File) {
+  const body = new FormData()
+  body.append('file', file)
+  return apiRequest<PatientImportResult>('/patients/import/', { method: 'POST', body, auth: true })
+}
+
 export function updatePatient(uuid: string, input: PatientInput) {
   return apiRequest<Patient>(`/patients/${uuid}/`, {
     method: 'PATCH',
